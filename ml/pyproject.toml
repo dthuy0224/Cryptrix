@@ -1,0 +1,14 @@
+[project]
+name = "cryptrix-ml"
+version = "0.1.0"
+description = "Machine Learning Models for Cryptrix"
+requires-python = ">=3.11"
+dependencies = [
+    "xgboost>=2.0.3",
+    "prophet>=1.1.5",
+    "mlflow>=2.11.1",
+    "scikit-learn>=1.4.1.post1",
+    "pandas>=2.2.1",
+    "numpy>=1.26.4",
+    "requests>=2.31.0"
+]

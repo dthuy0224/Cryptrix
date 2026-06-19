@@ -1,0 +1,91 @@
+name: Cryptrix CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Python Quality Assurance (FastAPI, ETL Pipelines, ML scripts)
+  # ----------------------------------------------------------------------------
+  python-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv Package Manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Sync Dependencies & Virtualenv
+        run: uv sync
+
+      - name: Run Ruff Linter
+        run: uv run ruff check .
+
+      - name: Run Ruff Formatter Verification
+        run: uv run ruff format --check .
+
+      - name: Run Pytest Suites
+        run: uv run pytest tests/
+
+  # ----------------------------------------------------------------------------
+  # Frontend Web Quality Assurance (Next.js Dashboard)
+  # ----------------------------------------------------------------------------
+  frontend-qa:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './frontend/package.json'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run TypeScript Type-Check
+        run: npm run type-check
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Build Next.js Staging Bundle
+        run: npm run build
+
+  # ----------------------------------------------------------------------------
+  # Microservices Docker Container Builds
+  # ----------------------------------------------------------------------------
+  docker-build:
+    needs: [python-qa, frontend-qa]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Staging Backend Docker Image
+        run: |
+          docker build -t cryptrix-backend:${{ github.sha }} ./backend
+
+      - name: Build Staging Frontend Docker Image
+        run: |
+          docker build -t cryptrix-frontend:${{ github.sha }} ./frontend

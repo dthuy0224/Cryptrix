@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # scrape settings for the Prometheus system itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # scrape settings for the Cryptrix FastAPI Application
+  - job_name: "cryptrix-backend"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["backend:8000"]
