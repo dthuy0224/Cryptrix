@@ -1,62 +1,79 @@
 version: '3.8'
 
+# ==============================================================================
+# Cryptrix — Crypto AI Platform · Docker Compose
+# ==============================================================================
+# Services:
+#   postgres    — Application & MLflow metadata database
+#   redis       — Caching & session store
+#   mlflow      — MLOps experiment tracking & model registry
+#   api         — FastAPI prediction & market data server
+#   dashboard   — Streamlit analytics dashboard
+#
+# Usage:
+#   make up        — Start all services
+#   make down      — Stop all services
+#   make logs      — Tail logs
+# ==============================================================================
+
 services:
+
   # ----------------------------------------------------------------------------
-  # Database Service (Postgres)
+  # PostgreSQL — Application & MLflow backend
   # ----------------------------------------------------------------------------
   postgres:
     image: postgres:15-alpine
     container_name: cryptrix-postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: cryptrix_admin
-      POSTGRES_PASSWORD: cryptrix_secure_password_123
-      POSTGRES_DB: cryptrix_app
+      POSTGRES_USER: ${POSTGRES_USER:-cryptrix_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_env}
+      POSTGRES_DB: ${POSTGRES_DB:-cryptrix_db}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cryptrix_admin -d cryptrix_app"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cryptrix_admin} -d ${POSTGRES_DB:-cryptrix_db}" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ----------------------------------------------------------------------------
-  # Cache & Websocket Broker Service (Redis)
+  # Redis — Cache & session store
   # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: cryptrix-redis
-    restart: always
-    command: redis-server --requirepass redis_secure_password_123
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme_in_env}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis_secure_password_123", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme_in_env}", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ----------------------------------------------------------------------------
-  # MLOps Server (MLflow Tracking)
+  # MLflow — Experiment tracking & model registry
   # ----------------------------------------------------------------------------
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.11.1
+    image: mlflow/mlflow:v2.13.0
     container_name: cryptrix-mlflow
-    restart: always
+    restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${MLFLOW_PORT:-5000}:5000"
     environment:
-      - BACKEND_STORE_URI=postgresql://cryptrix_admin:cryptrix_secure_password_123@postgres:5432/cryptrix_app
+      - BACKEND_STORE_URI=postgresql://${POSTGRES_USER:-cryptrix_admin}:${POSTGRES_PASSWORD:-changeme_in_env}@postgres:5432/${POSTGRES_DB:-cryptrix_db}
       - DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
     volumes:
       - mlflow_artifacts:/mlflow/artifacts
     command: >
-      mlflow server 
-      --backend-store-uri postgresql://cryptrix_admin:cryptrix_secure_password_123@postgres:5432/cryptrix_app
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER:-cryptrix_admin}:${POSTGRES_PASSWORD:-changeme_in_env}@postgres:5432/${POSTGRES_DB:-cryptrix_db}
       --default-artifact-root /mlflow/artifacts
       --host 0.0.0.0
       --port 5000
@@ -65,24 +82,26 @@ services:
         condition: service_healthy
 
   # ----------------------------------------------------------------------------
-  # FastAPI Application Backend Server
+  # FastAPI — Prediction & market data API
+  # Note: Uses service name 'api' (not localhost) for inter-container comms
   # ----------------------------------------------------------------------------
-  backend:
+  api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: cryptrix-backend
-    restart: always
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: cryptrix-api
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     environment:
-      - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://cryptrix_admin:cryptrix_secure_password_123@postgres:5432/cryptrix_app
-      - REDIS_URL=redis://:redis_secure_password_123@redis:6379/0
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=redis_secure_password_123
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-cryptrix_admin}:${POSTGRES_PASSWORD:-changeme_in_env}@postgres:5432/${POSTGRES_DB:-cryptrix_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme_in_env}@redis:6379/0
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME:-cryptrix-market-forecasting}
+    volumes:
+      - ./data:/app/data           # Shared data directory
+      - ./models:/app/models       # Shared model artifacts
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,21 +109,27 @@ services:
         condition: service_healthy
 
   # ----------------------------------------------------------------------------
-  # Next.js Application Frontend Dashboard
+  # Streamlit Dashboard — Analytics & visualization
   # ----------------------------------------------------------------------------
-  frontend:
+  dashboard:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: cryptrix-frontend
-    restart: always
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: cryptrix-dashboard
+    restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${DASHBOARD_PORT:-8501}:8501"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
-      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/api/v1/market/ws
+      - API_BASE_URL=http://api:8000/api/v1
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
+      - NEWS_API_KEY=${NEWS_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
     depends_on:
-      - backend
+      - api
 
 volumes:
   postgres_data:
